@@ -45,6 +45,15 @@ local GAMES = {
         url   = "https://raw.githubusercontent.com/JualNasiRendang/nasirendang-evomon/refs/heads/main/nasirendang-evomon.lua",
     },
     {
+        name  = "Anime Expedition",
+        desc  = "Auto match / farm",
+        icon  = "rbxassetid://131974959514318",
+        match = { "anime expedition", "expedition" },
+        url   = "https://api.jnkie.com/api/v1/luascripts/public/88d7c50e925718aa0f8a19e535e94024570e174b136d6cde0200b2f983c13350/download",
+        -- Set on getgenv() before the chunk runs (keyless auth for this provider).
+        genv  = { SCRIPT_KEY = "KEYLESS" },
+    },
+    {
         name  = "Grow A Garden",
         desc  = "Auto farm / shop / sell",
         icon  = "rbxassetid://103507136591905",
