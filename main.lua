@@ -40,28 +40,28 @@ local GAMES = {
     {
         name  = "Evomon",
         desc  = "Auto hunt / evolve",
-        icon  = "rbxassetid://130560455657984",
+        icon  = "rbxassetid://112510549708715",
         match = { "evomon" },
         url   = "https://raw.githubusercontent.com/JualNasiRendang/nasirendang-evomon/refs/heads/main/nasirendang-evomon.lua",
     },
     {
         name  = "Grow A Garden",
         desc  = "Auto farm / shop / sell",
-        icon  = "rbxassetid://99059513244042",
+        icon  = "rbxassetid://103507136591905",
         match = { "grow a garden", "garden" },
         url   = "https://raw.githubusercontent.com/JualNasiRendang/gag2/refs/heads/main/gag2.lua",
     },
     {
         name  = "Tap Heroes: Pet Simulator 99",
         desc  = "Auto tap / farm",
-        icon  = "rbxassetid://105448686912619",
+        icon  = "rbxassetid://95633120003456",
         match = { "pet simulator", "tap heroes" },
         url   = "https://raw.githubusercontent.com/JualNasiRendang/tap-heroes-pet-99/refs/heads/main/tapheroes.lua",
     },
     {
         name  = "Haze Seas",
         desc  = "Auto punch / farm",
-        icon  = "rbxassetid://105345745320241",
+        icon  = "rbxassetid://95336994655521",
         match = { "haze seas", "haze" },
         url   = "https://api.jnkie.com/api/v1/luascripts/public/22f48663c6746ee37619da35213c1fe72cdb0ec30bdfbba83773d2b2f595a53d/download",
         -- Set on getgenv() before the chunk runs (keyless auth for this provider).
@@ -70,7 +70,7 @@ local GAMES = {
     {
         name  = "Build a Ring Farm",
         desc  = "Auto farm",
-        icon  = "rbxassetid://130560455657984",
+        icon  = "rbxassetid://131809011640166",
         match = { "build a ring", "ring farm" },
         url   = "https://raw.githubusercontent.com/JualNasiRendang/nasirendang-barf/refs/heads/main/nasirendang-barf.lua",
     },
@@ -327,9 +327,11 @@ local GamesView = new("Frame", {
     Position = UDim2.fromScale(1, 0), BackgroundTransparency = 1, Visible = false,
 })
 
+local unlockedRef = { v = false }  -- shared with the password gate below
 local currentView = "home"
 local function goTo(view)
     if currentView == view then return end
+    if view == "games" and not unlockedRef.v then return end  -- locked until password
     currentView = view
     local toGames = (view == "games")
 
@@ -358,9 +360,9 @@ BackButton.MouseButton1Click:Connect(function() goTo("home") end)
 -- ============================== Home view ===============================
 
 local BigLogo = new("ImageLabel", {
-    Parent = HomeView, Size = UDim2.fromOffset(72, 72), AnchorPoint = Vector2.new(0.5, 0),
-    Position = UDim2.new(0.5, 0, 0, 14), BackgroundTransparency = 1, Image = LOGO,
-}, { corner(16) })
+    Parent = HomeView, Size = UDim2.fromOffset(60, 60), AnchorPoint = Vector2.new(0.5, 0),
+    Position = UDim2.new(0.5, 0, 0, 8), BackgroundTransparency = 1, Image = LOGO,
+}, { corner(14) })
 -- Soft accent ring behind the mark, breathing on a slow loop.
 local LogoRing = new("UIStroke", {
     Parent = BigLogo, Color = Theme.Accent, Thickness = 1.5, Transparency = 0.55,
@@ -368,19 +370,47 @@ local LogoRing = new("UIStroke", {
 })
 
 new("TextLabel", {
-    Parent = HomeView, Size = UDim2.new(1, -32, 0, 20), Position = UDim2.new(0, 16, 0, 96),
+    Parent = HomeView, Size = UDim2.new(1, -32, 0, 20), Position = UDim2.new(0, 16, 0, 72),
     BackgroundTransparency = 1, Font = Enum.Font.GothamBold, Text = TITLE .. " Free Script",
-    TextColor3 = Theme.Text, TextSize = 17, TextXAlignment = Enum.TextXAlignment.Center,
+    TextColor3 = Theme.Text, TextSize = 16, TextXAlignment = Enum.TextXAlignment.Center,
 })
 local PlaceLabel = new("TextLabel", {
-    Parent = HomeView, Size = UDim2.new(1, -32, 0, 14), Position = UDim2.new(0, 16, 0, 118),
+    Parent = HomeView, Size = UDim2.new(1, -32, 0, 14), Position = UDim2.new(0, 16, 0, 92),
     BackgroundTransparency = 1, Font = Enum.Font.Gotham, Text = "Detecting game...",
     TextColor3 = Theme.SubText, TextSize = 11, TextXAlignment = Enum.TextXAlignment.Center,
     TextTruncate = Enum.TextTruncate.AtEnd,
 })
 
+-- ---- Password gate ----------------------------------------------------
+-- Same scheme as the GAG2 panel: a fixed pass, cached to disk so a correct
+-- entry skips the prompt on re-inject within CACHE_DURATION. Choose Game is
+-- locked until unlocked.
+local PASS           = "1306"
+local CACHE_FILE     = "nr_loader_cache.txt"
+local CACHE_DURATION = 5 * 3600
+
+local unlocked = false
+local function cacheValid()
+    local ok, data = pcall(readfile, CACHE_FILE)
+    if not ok or not data or data == "" then return false end
+    local t = tonumber(data)
+    return t ~= nil and (os.time() - t) < CACHE_DURATION
+end
+
+local PassBox = new("Frame", {
+    Parent = HomeView, Size = UDim2.new(1, -80, 0, 34), Position = UDim2.new(0, 40, 0, 114),
+    BackgroundColor3 = Theme.Control, BackgroundTransparency = CTRL_T, BorderSizePixel = 0,
+}, { corner(9), stroke(Theme.Border, 1) })
+local PassInput = new("TextBox", {
+    Parent = PassBox, Size = UDim2.new(1, -16, 1, 0), Position = UDim2.fromOffset(8, 0),
+    BackgroundTransparency = 1, PlaceholderText = "Enter password",
+    PlaceholderColor3 = Theme.SubText, Text = "", Font = Enum.Font.GothamBold,
+    TextColor3 = Theme.Text, TextSize = 12, ClearTextOnFocus = false,
+    TextXAlignment = Enum.TextXAlignment.Center,
+})
+
 local ChooseButton = new("TextButton", {
-    Parent = HomeView, Size = UDim2.new(1, -80, 0, 40), Position = UDim2.new(0, 40, 0, 148),
+    Parent = HomeView, Size = UDim2.new(1, -80, 0, 38), Position = UDim2.new(0, 40, 0, 158),
     BackgroundColor3 = Theme.AccentDim, BackgroundTransparency = 0.1, BorderSizePixel = 0,
     AutoButtonColor = false, Font = Enum.Font.GothamBold, Text = "CHOOSE GAME",
     TextSize = 13, TextColor3 = Theme.Text,
@@ -402,12 +432,64 @@ do
         TweenService:Create(sc, T_FAST, { Scale = 1.03 }):Play()
     end)
 end
-ChooseButton.MouseButton1Click:Connect(function() goTo("games") end)
+-- Collapse the password field and open up the button once unlocked. The
+-- button slides up into the freed space so the layout stays tight.
+local function setUnlocked(fromCache)
+    if unlocked then return end
+    unlocked = true; unlockedRef.v = true
+    if not fromCache then pcall(writefile, CACHE_FILE, tostring(os.time())) end
+    TweenService:Create(PassBox, T_FAST, { Size = UDim2.new(1, -80, 0, 0),
+        BackgroundTransparency = 1 }):Play()
+    TweenService:Create(PassBox.UIStroke, T_FAST, { Transparency = 1 }):Play()
+    TweenService:Create(PassInput, T_FAST, { TextTransparency = 1 }):Play()
+    TweenService:Create(ChooseButton, T_VIEW, { Position = UDim2.new(0, 40, 0, 120),
+        Size = UDim2.new(1, -80, 0, 42) }):Play()
+    task.delay(0.2, function() if PassBox.Parent then PassBox.Visible = false end end)
+end
+
+local function tryUnlock()
+    if unlocked then return end
+    if PassInput.Text == PASS then
+        showToast("Access granted.")
+        setUnlocked(false)
+    else
+        -- Shake the field on a wrong entry.
+        local op = PassBox.Position
+        for i = 1, 4 do
+            PassBox.Position = op + UDim2.fromOffset(i % 2 == 0 and 5 or -5, 0)
+            task.wait(0.04)
+        end
+        PassBox.Position = op
+        PassInput.Text = ""
+        TweenService:Create(PassBox.UIStroke, T_FAST, { Color = Theme.Danger, Transparency = 0.1 }):Play()
+        task.delay(0.6, function()
+            TweenService:Create(PassBox.UIStroke, T_FAST, { Color = Theme.Border, Transparency = 0.2 }):Play()
+        end)
+        showToast("Wrong password.", true, 3)
+    end
+end
+PassInput.FocusLost:Connect(function(enter) if enter then tryUnlock() end end)
+
+-- Skip the gate entirely if a recent unlock is cached.
+if cacheValid() then
+    unlocked = true; unlockedRef.v = true
+    PassBox.Visible = false
+    ChooseButton.Position = UDim2.new(0, 40, 0, 120)
+    ChooseButton.Size = UDim2.new(1, -80, 0, 42)
+end
+
+ChooseButton.MouseButton1Click:Connect(function()
+    if not unlocked then
+        tryUnlock()
+        return
+    end
+    goTo("games")
+end)
 
 local DiscordButton = new("TextButton", {
-    Parent = HomeView, Size = UDim2.new(1, -80, 0, 18), Position = UDim2.new(0, 40, 0, 198),
+    Parent = HomeView, Size = UDim2.new(1, -80, 0, 18), Position = UDim2.new(0, 40, 0, 204),
     BackgroundTransparency = 1, AutoButtonColor = false, Font = Enum.Font.Gotham,
-    Text = "discord.gg/vrzg9YaNPj — click to copy", TextSize = 10, TextColor3 = Theme.Accent,
+    Text = "password join : discord.gg/vrzg9YaNPj — click to copy", TextSize = 10, TextColor3 = Theme.Accent,
 })
 DiscordButton.MouseButton1Click:Connect(function()
     local ok = pcall(setclipboard, DISCORD)
