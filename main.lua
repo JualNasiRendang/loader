@@ -54,7 +54,7 @@ local GAMES = {
         genv  = { SCRIPT_KEY = "KEYLESS" },
     },
     {
-        name  = "Grow A Garden",
+        name  = "Grow A Garden 2",
         desc  = "Auto farm / shop / sell",
         icon  = "rbxassetid://103507136591905",
         match = { "grow a garden", "garden" },
