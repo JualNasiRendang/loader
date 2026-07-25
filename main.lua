@@ -54,6 +54,15 @@ local GAMES = {
         genv  = { SCRIPT_KEY = "KEYLESS" },
     },
     {
+        name  = "Anime Card Farm",
+        desc  = "Auto farm / cards",
+        icon  = "rbxassetid://115169947896689",
+        match = { "anime card" },
+        url   = "https://api.jnkie.com/api/v1/luascripts/public/d693ae5060342c1304e1eddc119181b94a8189b784f1e414fb24894dba3d43a2/download",
+        -- Set on getgenv() before the chunk runs (keyless auth for this provider).
+        genv  = { SCRIPT_KEY = "KEYLESS" },
+    },
+    {
         name  = "Grow A Garden 2",
         desc  = "Auto farm / shop / sell",
         icon  = "rbxassetid://103507136591905",
