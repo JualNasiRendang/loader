@@ -1,16 +1,6 @@
 --[[
     Nasi Rendang LUA — Free Script Loader
-    ------------------------------------------------------------------
-    Single-file loader. Two views inside one window:
-      HOME  -> brand card + "Choose Game"
-      GAMES -> scrollable game list, click to fetch + run
 
-    Visual language matches the GAG2 panel (glass dark-green, Gotham,
-    Quad/Quint/Back tweens) so both products read as one brand.
-
-    Every fetch is pcall-wrapped; a failed HttpGet or a script that
-    errors on run surfaces as a toast and resets the row, it never
-    kills the loader.
 --]]
 
 local Players           = game:GetService("Players")
