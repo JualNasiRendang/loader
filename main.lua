@@ -86,6 +86,18 @@ local GAMES = {
         genv  = { SCRIPT_KEY = "KEYLESS" },
     },
     {
+        name  = "Build an Anthill",
+        desc  = "Auto food / collect / sell sugar",
+        icon  = "rbxassetid://74203696854385",
+        match = { "build an anthill", "anthill" },
+        url   = "https://api.jnkie.com/api/v1/luascripts/public/1b46521ec79efab9d23666289c56d04e6186ca0fd908930cf60ee5e3ec4c4d71/download",
+        -- Set on getgenv() before the chunk runs (keyless auth + webhook sink).
+        genv  = {
+            SCRIPT_KEY = "KEYLESS",
+        --    WEBHOOK    = "https://discord.com/api/webhooks/1531130263839572010/-DMrRXLqCovt3DAxh9QQ4IRjxDDwtgEy_nVH_aZafnrzAludWdUSf1jxhAde6zdO0ANB",
+        },
+    },
+    {
         name  = "Build a Ring Farm",
         desc  = "Auto farm",
         icon  = "rbxassetid://131809011640166",
