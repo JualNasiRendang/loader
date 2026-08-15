@@ -135,9 +135,11 @@ local function doHop()
     armAutoExec() -- re-inject diri sendiri di server baru via URL
     local cands = fetchServers()
     if #cands == 0 then
+        -- ga ada kandidat: jangan matchmake (bisa balik ke server yang sama).
+        -- Refresh cache biar retry berikutnya fetch ulang beneran.
         hopping = false
-        pcall(function() TS:Teleport(PLACE, LocalPlayer) end)
-        return true
+        lastFetch = 0
+        return false
     end
     -- Prefer empty: ambil tier paling sepi (min player +1) terus shuffle biar
     -- ga nyangkut di job mati yang sama terus. Kalo off: shuffle semua kandidat.
@@ -156,8 +158,11 @@ local function doHop()
         local s = cands[idx]
         if not s then
             if conn then conn:Disconnect() end
+            -- kandidat abis semua: jangan matchmake (bisa balik ke server
+            -- yang sama). Refresh cache biar scan berikutnya dapet server
+            -- fresh (list API sering isinya job mati/stale).
             hopping = false
-            pcall(function() TS:Teleport(PLACE, LocalPlayer) end)
+            lastFetch = 0
             return
         end
         pcall(function() TS:TeleportToPlaceInstance(PLACE, s.id, LocalPlayer) end)
