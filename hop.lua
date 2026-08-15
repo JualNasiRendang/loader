@@ -35,6 +35,7 @@ local S = {
     hopNoMatchDelay = 60,             -- detik tanpa claim
     hopInterval     = 15,             -- menit
     hopSteals       = 50,             -- jumlah claim
+    hopMinPlayers   = 3,              -- server target harus isi >= ini (0 = off)
     hopPreferEmpty  = true,
     autoChat        = false,
     chatText        = "",
@@ -80,8 +81,10 @@ local function fetchServers()
     if ok2 and type(data) == "table" and type(data.data) == "table" then
         for _, s in ipairs(data.data) do
             if s.id and s.id ~= game.JobId and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
-                -- random: ga ada filter jumlah player, cuma exclude server ini + full
-                list[#list + 1] = s
+                -- filter min player (0 = off), selain itu random
+                if (S.hopMinPlayers or 0) <= 0 or s.playing >= (S.hopMinPlayers or 0) then
+                    list[#list + 1] = s
+                end
             end
         end
     end
@@ -96,6 +99,12 @@ local function doHop()
     armAutoExec() -- re-inject diri sendiri di server baru via URL
     local cands = fetchServers()
     if #cands == 0 then
+        -- min-player aktif tapi ga ada yang cocok: jangan matchmake ke server
+        -- kecil - skip, loop retry lagi 5 detik kemudian
+        if (S.hopMinPlayers or 0) > 0 then
+            hopping = false
+            return false
+        end
         hopping = false
         pcall(function() TS:Teleport(PLACE, LocalPlayer) end)
         return true
@@ -442,6 +451,7 @@ dropdown("Hop When", "hopWhen", { "Any", "After Steal Count", "Interval", "No Ma
 slider("No Match Delay (s)", "hopNoMatchDelay", 3, 180, 1)
 slider("Hop Interval (min)", "hopInterval", 1, 120, 1)
 slider("Steals Before Hop", "hopSteals", 10, 200, 5)
+slider("Min Players (0=off)", "hopMinPlayers", 0, 30, 1)
 toggle("Prefer Emptiest Server", "hopPreferEmpty")
 button("Hop Now", function() doHop() end)
 hopCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
