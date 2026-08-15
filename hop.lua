@@ -35,7 +35,6 @@ local S = {
     hopNoMatchDelay = 60,             -- detik tanpa claim
     hopInterval     = 15,             -- menit
     hopSteals       = 50,             -- jumlah claim
-    hopMinPlayers   = 3,              -- server target harus isi >= ini (0 = off)
     hopPreferEmpty  = true,
     autoChat        = false,
     chatText        = "",
@@ -71,27 +70,49 @@ pcall(function()
 end)
 
 -- ==================== server list ====================
+local lastFetch, lastList = 0, nil
 local function fetchServers()
+    -- cache 15 detik: API Roblox rate-limit kalo di-spam (429) - jangan
+    -- hammer tiap 5 detik, pake hasil yang barusan
+    local now = os.clock()
+    if lastList and (now - lastFetch) < 15 then
+        return lastList
+    end
+    local function httpGet(url)
+        local res
+        local function try(fn)
+            local ok, r = pcall(fn)
+            if ok and type(r) == "string" and #r > 0 then res = r return true end
+            return false
+        end
+        -- coba semua method executor yang tersedia
+        pcall(function() try(function() return game:HttpGet(url) end) end)
+        if not res then pcall(function() try(function() return (request or http_request or (http and http.request))({ Url = url, Method = "GET" }).Body end) end) end
+        if not res then pcall(function() try(function() return game:GetService("HttpService"):GetAsync(url) end) end) end
+        return res
+    end
     local list = {}
-    -- API cuma balikin 100 server per halaman, diurutin dari yang PALING SEPI
-    -- dulu (Asc). Kalo game punya ratusan server, 100 pertama bisa 0-2 player
-    -- semua - makanya di-paginasi terus sampe ketemu yang >= min player.
+    -- sortOrder=Desc: ambil server dari yang PALING RAME dulu (bukan yang
+    -- paling sepi), terus di-shuffle di doHop - jadi dapet server rame tapi
+    -- tetap acak. Paginasi biar kandidatnya makin banyak.
     local cursor = ""
     local pages = 0
     for _ = 1, 10 do -- maks 10 halaman (1000 server)
-        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s"):format(
+        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100%s"):format(
             PLACE, cursor ~= "" and ("&cursor=" .. HS:UrlEncode(cursor)) or "")
-        local ok, body = pcall(function() return game:HttpGet(url) end)
-        if not ok then break end
+        local body
+        for attempt = 1, 3 do
+            body = httpGet(url)
+            if body then break end
+            task.wait(3 * attempt) -- backoff buat 429 rate-limit
+        end
+        if not body then break end
         local ok2, data = pcall(function() return HS:JSONDecode(body) end)
         if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then break end
         pages = pages + 1
         for _, s in ipairs(data.data) do
             if s.id and s.id ~= game.JobId and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
-                -- filter min player (0 = off), selain itu random
-                if (S.hopMinPlayers or 0) <= 0 or s.playing >= (S.hopMinPlayers or 0) then
-                    list[#list + 1] = s
-                end
+                list[#list + 1] = s
             end
         end
         if #list >= 30 then break end -- udah cukup buat dipilih acak
@@ -101,8 +122,8 @@ local function fetchServers()
             break
         end
     end
-    print(("[AutoHop] scan: %d halaman | %d server lolos filter (min %d)"):format(
-        pages, #list, S.hopMinPlayers or 0))
+    print(("[AutoHop] scan: %d halaman | %d server ditemukan"):format(pages, #list))
+    lastFetch, lastList = os.clock(), list
     return list
 end
 
@@ -114,12 +135,6 @@ local function doHop()
     armAutoExec() -- re-inject diri sendiri di server baru via URL
     local cands = fetchServers()
     if #cands == 0 then
-        -- min-player aktif tapi ga ada yang cocok: jangan matchmake ke server
-        -- kecil - skip, loop retry lagi 5 detik kemudian
-        if (S.hopMinPlayers or 0) > 0 then
-            hopping = false
-            return false
-        end
         hopping = false
         pcall(function() TS:Teleport(PLACE, LocalPlayer) end)
         return true
@@ -466,7 +481,6 @@ dropdown("Hop When", "hopWhen", { "Any", "After Steal Count", "Interval", "No Ma
 slider("No Match Delay (s)", "hopNoMatchDelay", 3, 180, 1)
 slider("Hop Interval (min)", "hopInterval", 1, 120, 1)
 slider("Steals Before Hop", "hopSteals", 10, 200, 5)
-slider("Min Players (0=off)", "hopMinPlayers", 0, 30, 1)
 toggle("Prefer Emptiest Server", "hopPreferEmpty")
 button("Hop Now", function() doHop() end)
 hopCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
