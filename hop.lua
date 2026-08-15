@@ -73,12 +73,19 @@ end)
 -- ==================== server list ====================
 local function fetchServers()
     local list = {}
-    local ok, body = pcall(function()
-        return game:HttpGet(("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100"):format(PLACE))
-    end)
-    if not ok then return list end
-    local ok2, data = pcall(function() return HS:JSONDecode(body) end)
-    if ok2 and type(data) == "table" and type(data.data) == "table" then
+    -- API cuma balikin 100 server per halaman, diurutin dari yang PALING SEPI
+    -- dulu (Asc). Kalo game punya ratusan server, 100 pertama bisa 0-2 player
+    -- semua - makanya di-paginasi terus sampe ketemu yang >= min player.
+    local cursor = ""
+    local pages = 0
+    for _ = 1, 10 do -- maks 10 halaman (1000 server)
+        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s"):format(
+            PLACE, cursor ~= "" and ("&cursor=" .. HS:UrlEncode(cursor)) or "")
+        local ok, body = pcall(function() return game:HttpGet(url) end)
+        if not ok then break end
+        local ok2, data = pcall(function() return HS:JSONDecode(body) end)
+        if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then break end
+        pages = pages + 1
         for _, s in ipairs(data.data) do
             if s.id and s.id ~= game.JobId and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
                 -- filter min player (0 = off), selain itu random
@@ -87,7 +94,15 @@ local function fetchServers()
                 end
             end
         end
+        if #list >= 30 then break end -- udah cukup buat dipilih acak
+        if type(data.nextPageCursor) == "string" and data.nextPageCursor ~= "" then
+            cursor = data.nextPageCursor
+        else
+            break
+        end
     end
+    print(("[AutoHop] scan: %d halaman | %d server lolos filter (min %d)"):format(
+        pages, #list, S.hopMinPlayers or 0))
     return list
 end
 
