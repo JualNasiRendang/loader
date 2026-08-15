@@ -35,6 +35,8 @@ local S = {
     hopNoMatchDelay = 60,             -- detik tanpa claim
     hopInterval     = 15,             -- menit
     hopSteals       = 50,             -- jumlah claim
+    hopMinPlayers   = 3,              -- target: server isi >= ini (0 = off)
+    hopMaxPlayers   = 0,              -- target: server isi <= ini (0 = off)
     hopPreferEmpty  = true,
     autoChat        = false,
     chatText        = "",
@@ -82,23 +84,35 @@ local function fetchServers()
         local res
         local function try(fn)
             local ok, r = pcall(fn)
-            if ok and type(r) == "string" and #r > 0 then res = r return true end
+            if ok and type(r) == "string" and #r > 0 then
+                -- VALIDASI: respons harus JSON dengan .data yang ISI (>0 entry).
+                -- Proxy Volt suka balikin error {"errors":[{"code":0}]} ATAU
+                -- respons yang data-nya dikosongin - dua-duanya ditolak biar
+                -- fallback ke method berikutnya.
+                local ok2, d = pcall(function() return HS:JSONDecode(r) end)
+                if ok2 and type(d) == "table" and type(d.data) == "table" and #d.data > 0 then
+                    res = r
+                    return true
+                end
+            end
             return false
         end
-        -- coba semua method executor yang tersedia
-        pcall(function() try(function() return game:HttpGet(url) end) end)
-        if not res then pcall(function() try(function() return (request or http_request or (http and http.request))({ Url = url, Method = "GET" }).Body end) end) end
+        -- request/http_request DULU (terbukti dapet data asli dari client),
+        -- baru game:HttpGet, terakhir GetAsync
+        pcall(function() try(function() return (request or http_request or (http and http.request))({ Url = url, Method = "GET" }).Body end) end)
+        if not res then pcall(function() try(function() return game:HttpGet(url) end) end) end
         if not res then pcall(function() try(function() return game:GetService("HttpService"):GetAsync(url) end) end) end
         return res
     end
     local list = {}
-    -- sortOrder=Desc: ambil server dari yang PALING RAME dulu (bukan yang
-    -- paling sepi), terus di-shuffle di doHop - jadi dapet server rame tapi
-    -- tetap acak. Paginasi biar kandidatnya makin banyak.
+    -- sortOrder=Asc: dari paling sepi. Server 0-2 player di halaman awal
+    -- ke-skip sama filter min (3), jadi di-paginasi jauh (maks 10 halaman)
+    -- sampe ketemu yang isinya >= min. Server penuh (7/7) tetep ditolak.
     local cursor = ""
     local pages = 0
+    local sample = nil
     for _ = 1, 10 do -- maks 10 halaman (1000 server)
-        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100%s"):format(
+        local url = ("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Asc&limit=100%s"):format(
             PLACE, cursor ~= "" and ("&cursor=" .. HS:UrlEncode(cursor)) or "")
         local body
         for attempt = 1, 3 do
@@ -110,9 +124,16 @@ local function fetchServers()
         local ok2, data = pcall(function() return HS:JSONDecode(body) end)
         if not ok2 or type(data) ~= "table" or type(data.data) ~= "table" then break end
         pages = pages + 1
+        if #data.data > 0 and not sample then sample = data.data[1] end
         for _, s in ipairs(data.data) do
             if s.id and s.id ~= game.JobId and type(s.playing) == "number" and s.playing < (s.maxPlayers or 999) then
-                list[#list + 1] = s
+                -- filter rentang player (0 = off). Contoh min=3 max=4 =
+                -- cari server yang isinya 3-4 player.
+                local okMin = (S.hopMinPlayers or 0) <= 0 or s.playing >= (S.hopMinPlayers or 0)
+                local okMax = (S.hopMaxPlayers or 0) <= 0 or s.playing <= (S.hopMaxPlayers or 0)
+                if okMin and okMax then
+                    list[#list + 1] = s
+                end
             end
         end
         if #list >= 30 then break end -- udah cukup buat dipilih acak
@@ -123,6 +144,24 @@ local function fetchServers()
         end
     end
     print(("[AutoHop] scan: %d halaman | %d server ditemukan"):format(pages, #list))
+    if #list == 0 and sample then
+        -- debug: halaman kebaca tapi ga ada yang lolos filter - kemungkinan
+        -- struktur datanya beda, dump entry pertama buat dianalisa
+        print("[AutoHop] sample entry: " .. HS:JSONEncode(sample))
+    end
+    if pages == 0 then
+        -- debug: tampilin isi respons API biar keliatan error-nya apa
+        -- (429 rate-limit / place invalid / dll)
+        local lastBody
+        pcall(function()
+            lastBody = httpGet(("https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=100"):format(PLACE))
+        end)
+        if lastBody then
+            print("[AutoHop] API response: " .. tostring(lastBody):sub(1, 200))
+        else
+            print("[AutoHop] API response: (semua method HTTP gagal)")
+        end
+    end
     lastFetch, lastList = os.clock(), list
     return list
 end
@@ -135,8 +174,9 @@ local function doHop()
     armAutoExec() -- re-inject diri sendiri di server baru via URL
     local cands = fetchServers()
     if #cands == 0 then
-        -- ga ada kandidat: jangan matchmake (bisa balik ke server yang sama).
-        -- Refresh cache biar retry berikutnya fetch ulang beneran.
+        -- ga ada server yang masuk rentang player: jangan matchmake (bisa
+        -- balik ke server yang sama). Refresh cache biar retry berikutnya
+        -- fetch ulang beneran, loop cek lagi 5 detik kemudian.
         hopping = false
         lastFetch = 0
         return false
@@ -486,6 +526,8 @@ dropdown("Hop When", "hopWhen", { "Any", "After Steal Count", "Interval", "No Ma
 slider("No Match Delay (s)", "hopNoMatchDelay", 3, 180, 1)
 slider("Hop Interval (min)", "hopInterval", 1, 120, 1)
 slider("Steals Before Hop", "hopSteals", 10, 200, 5)
+slider("Players Min (0=off)", "hopMinPlayers", 0, 30, 1)
+slider("Players Max (0=off)", "hopMaxPlayers", 0, 30, 1)
 toggle("Prefer Emptiest Server", "hopPreferEmpty")
 button("Hop Now", function() doHop() end)
 hopCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
