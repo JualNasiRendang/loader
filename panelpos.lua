@@ -12,8 +12,10 @@
     ============================================================================
 ]]
 
-if getgenv().__PANELPOS_RUN then return end
-getgenv().__PANELPOS_RUN = true
+-- version guard (bukan boolean): execute ulang = instance baru, instance
+-- lama mati. Boolean guard bikin execute ulang di server yang sama ga jalan.
+local MY_RUN = os.clock()
+getgenv().__PANELPOS_ACTIVE = MY_RUN
 
 local LOADER_URL = "https://raw.githubusercontent.com/JualNasiRendang/loader/refs/heads/main/panelpos.lua"
 
@@ -25,7 +27,7 @@ local function keepPos(win)
 end
 
 task.spawn(function()
-    while true do
+    while getgenv().__PANELPOS_ACTIVE == MY_RUN do
         local roots = {
             game:GetService("Players").LocalPlayer:FindFirstChildOfClass("PlayerGui"),
             game:GetService("CoreGui"),
@@ -55,8 +57,6 @@ end)
 -- auto-execute: pas hop, download ulang dari URL terus loadstring
 if type(queueonteleport) == "function" then
     pcall(queueonteleport, ([[
-if getgenv().__PANELPOS_RUN then return end
-getgenv().__PANELPOS_RUN = true
 task.spawn(function()
     pcall(function() if not game:IsLoaded() then game.Loaded:Wait() end end)
     task.wait(2)
