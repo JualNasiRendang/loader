@@ -43,6 +43,14 @@ local S = {
     chatText2       = "",
     chatText3       = "",
     chatInterval    = 30,
+    -- auto accept friends (via mekanisme notifikasi friend request game)
+    autoAcceptFriends = true,
+    -- camera lock (offset relatif ke karakter, tersimpan ke config)
+    camLock         = false,
+    camOffX         = 0,
+    camOffY         = 40,
+    camOffZ         = 0,
+    camFov          = 70,
 }
 
 local function saveConfig()
@@ -322,6 +330,39 @@ task.spawn(function()
     end
 end)
 
+-- ==================== auto accept friends ====================
+-- Game ini punya mekanisme friend request sendiri: server fire event
+-- FRIEND_REQUEST (Gifting) ke client + tombol accept-nya jalanin
+-- CoreCall("SetCore", "PromptSendFriendRequest", player). Jadi kita
+-- langsung auto-accept tiap kali ada yang add.
+pcall(function()
+    local Network = require(game.ReplicatedStorage.Library.Client.Network)
+    local CoreCall = require(game.ReplicatedStorage.Library.Functions.CoreCall)
+    Network.Fired(Network.NET_MAP.Gifting.FRIEND_REQUEST):Connect(function(player)
+        if S.autoAcceptFriends and player and player:IsA("Player") then
+            pcall(function() CoreCall("SetCore", "PromptSendFriendRequest", player) end)
+            print("[AutoHop] friend request accepted: " .. tostring(player.Name))
+        end
+    end)
+end)
+
+-- ==================== camera lock ====================
+-- Offset relatif ke karakter (tersimpan di config) - kamera ngikutin
+-- karakter tapi sudut/jarak/zoom terkunci. Angka-angkanya ke-set lewat
+-- UI (slider live) atau tombol "Capture Current POV".
+local RunService = game:GetService("RunService")
+local cam = game.Workspace.CurrentCamera
+RunService.RenderStepped:Connect(function()
+    if not S.camLock then return end
+    local chr = LocalPlayer.Character
+    local r = chr and chr:FindFirstChild("HumanoidRootPart")
+    if not (r and cam) then return end
+    cam.CameraType = Enum.CameraType.Custom
+    cam.FieldOfView = S.camFov or 70
+    local off = Vector3.new(S.camOffX or 0, S.camOffY or 0, S.camOffZ or 0)
+    cam.CFrame = CFrame.lookAt(r.Position + off, r.Position + Vector3.new(0, 2, 0))
+end)
+
 -- ==================== main loop ====================
 task.spawn(function()
     while getgenv().__AUTOHOP_ACTIVE == MY_RUN do
@@ -475,6 +516,11 @@ local function slider(label, key, minV, maxV, step)
             saveConfig()
         end
     end)
+    -- updater: refresh tampilan angka/knob dari S (buat tombol Capture)
+    return function()
+        valLbl.Text = tostring(S[key])
+        knob.Position = UDim2.new((S[key] - minV) / math.max(1, maxV - minV), 0, 0.5, 0)
+    end
 end
 
 local function textbox(label, key)
@@ -542,6 +588,30 @@ textbox("Chat Text 3", "chatText3")
 slider("Chat Interval (s)", "chatInterval", 5, 600, 5)
 chatCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
     Font = Enum.Font.BuilderSansMedium, Text = "chat off", TextColor3 = THEME.Sub, TextSize = 12 })
+section("Camera Lock")
+toggle("Lock Camera", "camLock")
+local updCamX, updCamY, updCamZ, updCamFov
+button("Capture Current POV", function()
+    local chr = LocalPlayer.Character
+    local r = chr and chr:FindFirstChild("HumanoidRootPart")
+    local c = game.Workspace.CurrentCamera
+    if r and c then
+        local off = c.CFrame.Position - r.Position
+        S.camOffX = math.floor(off.X + 0.5)
+        S.camOffY = math.floor(off.Y + 0.5)
+        S.camOffZ = math.floor(off.Z + 0.5)
+        S.camFov = c.FieldOfView
+        if updCamX then updCamX(); updCamY(); updCamZ(); updCamFov() end
+        saveConfig()
+        print(("[AutoHop] POV captured: %d, %d, %d | fov %d"):format(S.camOffX, S.camOffY, S.camOffZ, S.camFov))
+    end
+end)
+updCamX = slider("Offset X", "camOffX", -200, 200, 1)
+updCamY = slider("Offset Y", "camOffY", -100, 200, 1)
+updCamZ = slider("Offset Z", "camOffZ", -200, 200, 1)
+updCamFov = slider("FOV", "camFov", 30, 120, 1)
+section("Friends")
+toggle("Auto Accept Friends", "autoAcceptFriends")
 
 -- status updater (claims + countdown hop)
 task.spawn(function()
