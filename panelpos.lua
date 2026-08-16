@@ -77,4 +77,4 @@ end)
 ]]):format(LOADER_URL))
 end
 
-print("[PanelPos] keeper aktif - semua panel diparkir pojok kanan bawah")
+print("[PanelPos] keeper aktif - semua panel diparkir pojok kanan bawah wwww")
