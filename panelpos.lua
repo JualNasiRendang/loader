@@ -60,53 +60,6 @@ task.spawn(function()
     end
 end)
 
--- ==================== CAMERA LOCK (kamera GAME, bukan UI) ====================
--- Pas di-run, POV kamera game saat itu di-capture dan dikunci: kamera
--- ngikutin karakter tapi sudut + jarak + zoom tetep. Toggle: RightControl.
-local UIS        = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local LP         = game:GetService("Players").LocalPlayer
-local cam        = game.Workspace.CurrentCamera
-
-local camOn = true
-local camOffset, camLook, camFov
-
-local function getHrp()
-    local c = LP.Character
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-local function captureCam()
-    local r = getHrp()
-    if not (r and cam) then return false end
-    camOffset = cam.CFrame.Position - r.Position
-    camLook   = cam.CFrame.LookVector
-    camFov    = cam.FieldOfView
-    return true
-end
-task.spawn(function()
-    local r = LP.Character or LP.CharacterAdded:Wait()
-    pcall(function() r:WaitForChild("HumanoidRootPart", 10) end)
-    captureCam()
-end)
-UIS.InputBegan:Connect(function(inp, gpe)
-    if gpe then return end
-    if inp.KeyCode == Enum.KeyCode.RightControl then
-        camOn = not camOn
-        if camOn then captureCam() end
-        print("[PanelPos] camera lock " .. (camOn and "ON" or "OFF"))
-    end
-end)
-RunService.RenderStepped:Connect(function()
-    if not (camOn and cam) then return end
-    local r = getHrp()
-    if not r then return end
-    cam.CameraType = Enum.CameraType.Custom
-    cam.FieldOfView = camFov or 70
-    if camOffset and camLook then
-        cam.CFrame = CFrame.lookAt(r.Position + camOffset, (r.Position + camOffset) + camLook)
-    end
-end)
-
 -- auto-execute: pas hop, download ulang dari URL terus loadstring
 if type(queueonteleport) == "function" then
     pcall(queueonteleport, ([[
