@@ -575,7 +575,7 @@ slider("Steals Before Hop", "hopSteals", 10, 200, 5)
 slider("Players Min (0=off)", "hopMinPlayers", 0, 30, 1)
 slider("Players Max (0=off)", "hopMaxPlayers", 0, 30, 1)
 toggle("Prefer Emptiest Server", "hopPreferEmpty")
-button("Hop Now", function() doHop() end)
+button("Hop Now - 1", function() doHop() end)
 hopCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
     Font = Enum.Font.BuilderSansMedium, Text = "hop off", TextColor3 = THEME.Sub, TextSize = 12 })
 statusLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
