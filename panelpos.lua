@@ -26,6 +26,9 @@ local function keepPos(win)
     end)
 end
 
+-- snap SEKALI per panel (waktu pertama kali keliatan) - abis itu bebas
+-- di-drag ke mana aja, ga ditarik balik tiap 0.5 detik.
+local snapped = {}
 task.spawn(function()
     while getgenv().__PANELPOS_ACTIVE == MY_RUN do
         local roots = {
@@ -45,59 +48,15 @@ task.spawn(function()
                 for _, g in ipairs(root:GetChildren()) do
                     if g:IsA("ScreenGui") and tostring(g.Name):find("_Panel") then
                         local win = g:FindFirstChild("Window")
-                        if win and win:IsA("GuiObject") then keepPos(win) end
+                        if win and win:IsA("GuiObject") and not snapped[win] then
+                            snapped[win] = true
+                            keepPos(win)
+                        end
                     end
                 end
             end
         end
         task.wait(0.5)
-    end
-end)
-
--- ==================== CAMERA LOCK (POV) ====================
--- Pas di-run, POV kamera saat itu di-capture dan dikunci: kamera ikutin
--- karakter tapi sudut + jaraknya tetep. Toggle: RightControl.
-local UIS        = game:GetService("UserInputService")
-local RunService = game:GetService("RunService")
-local LP         = game:GetService("Players").LocalPlayer
-local cam        = game.Workspace.CurrentCamera
-
-local camOn = true
-local camOffset, camLook, camFov
-
-local function hrp()
-    local c = LP.Character
-    return c and c:FindFirstChild("HumanoidRootPart")
-end
-local function captureCam()
-    local r = hrp()
-    if not (r and cam) then return false end
-    camOffset = cam.CFrame.Position - r.Position
-    camLook   = cam.CFrame.LookVector
-    camFov    = cam.FieldOfView
-    return true
-end
-task.spawn(function()
-    local r = LP.Character or LP.CharacterAdded:Wait()
-    pcall(function() r:WaitForChild("HumanoidRootPart", 10) end)
-    captureCam()
-end)
-UIS.InputBegan:Connect(function(inp, gpe)
-    if gpe then return end
-    if inp.KeyCode == Enum.KeyCode.RightControl then
-        camOn = not camOn
-        if camOn then captureCam() end
-        print("[PanelPos] camera lock " .. (camOn and "ON" or "OFF"))
-    end
-end)
-RunService.RenderStepped:Connect(function()
-    if not (camOn and cam) then return end
-    local r = hrp()
-    if not r then return end
-    cam.CameraType = Enum.CameraType.Custom
-    cam.FieldOfView = camFov or 70
-    if camOffset and camLook then
-        cam.CFrame = CFrame.lookAt(r.Position + camOffset, (r.Position + camOffset) + camLook)
     end
 end)
 
