@@ -575,7 +575,7 @@ slider("Steals Before Hop", "hopSteals", 10, 200, 5)
 slider("Players Min (0=off)", "hopMinPlayers", 0, 30, 1)
 slider("Players Max (0=off)", "hopMaxPlayers", 0, 30, 1)
 toggle("Prefer Emptiest Server", "hopPreferEmpty")
-button("Hop Now - 1", function() doHop() end)
+button("Hop Now", function() doHop() end)
 hopCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
     Font = Enum.Font.BuilderSansMedium, Text = "hop off", TextColor3 = THEME.Sub, TextSize = 12 })
 statusLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
@@ -613,6 +613,21 @@ updCamFov = slider("FOV", "camFov", 30, 120, 1)
 section("Friends")
 toggle("Auto Accept Friends", "autoAcceptFriends")
 
+-- ==================== overlay countdown (tengah atas) ====================
+-- Teks putih border hitam, nunjukin kapan next hop. Format mm:ss kalo >= 1
+-- menit, detik biasa di bawahnya. Mati bareng panel (tombol x).
+local function fmtTime(s)
+    if s >= 60 then return ("%d:%02d"):format(math.floor(s / 60), math.floor(s % 60)) end
+    return ("%ds"):format(math.floor(s))
+end
+local OverlayLbl = new("TextLabel", { Parent = ScreenGui, Name = "NextHopOverlay",
+    AnchorPoint = Vector2.new(0.5, 0), Position = UDim2.new(0.5, 0, 0, 24),
+    Size = UDim2.new(0, 420, 0, 270), BackgroundTransparency = 1,
+    Font = Enum.Font.BuilderSansBold, Text = "Next Hop: off",
+    TextColor3 = Color3.new(1, 1, 1), TextSize = 104,
+    TextStrokeColor3 = Color3.new(0, 0, 0), TextStrokeTransparency = 0,
+    ZIndex = 50 })
+
 -- status updater (claims + countdown hop)
 task.spawn(function()
     while getgenv().__AUTOHOP_ACTIVE == MY_RUN do
@@ -634,6 +649,29 @@ task.spawn(function()
                 else
                     local t1 = math.max(0, (S.hopInterval or 15) * 60 - (os.clock() - hopStart))
                     hopCountLbl.Text = ("next hop in %ds"):format(math.ceil(t1))
+                end
+            end
+        end
+        -- overlay countdown tengah atas
+        if OverlayLbl then
+            if not S.autoHop then
+                OverlayLbl.Text = "Next Hop: off"
+            elseif hopping then
+                OverlayLbl.Text = "Next Hop: hopping…"
+            else
+                local m = S.hopWhen
+                if m == "After Steal Count" then
+                    local n = math.max(0, (S.hopSteals or 50) - (claims - hopBaseClaims))
+                    OverlayLbl.Text = ("Next Hop: %d steals"):format(n)
+                elseif m == "No Match" then
+                    OverlayLbl.Text = ("Next Hop: %s"):format(fmtTime(math.max(0, (S.hopNoMatchDelay or 60) - (os.clock() - lastClaim))))
+                elseif m == "Interval" then
+                    OverlayLbl.Text = ("Next Hop: %s"):format(fmtTime(math.max(0, (S.hopInterval or 15) * 60 - (os.clock() - hopStart))))
+                else -- Any: yang paling cepet dari interval / no-match
+                    local rem = math.max(0, math.min(
+                        (S.hopInterval or 15) * 60 - (os.clock() - hopStart),
+                        (S.hopNoMatchDelay or 60) - (os.clock() - lastClaim)))
+                    OverlayLbl.Text = ("Next Hop: %s"):format(fmtTime(rem))
                 end
             end
         end
