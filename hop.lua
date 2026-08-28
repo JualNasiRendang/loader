@@ -68,16 +68,69 @@ local function loadConfig()
 end
 loadConfig()
 
+-- forward-declare biar doHop() di bawah ga manggil global yang belum ada
+local armAutoExec
+
 -- ==================== steal tracker (claim counter) ====================
--- hitung claim via signal game (bukan counter panel) biar standalone
+-- PATCH 2026-08: ReplicatedStorage.Library UDAH DIHAPUS (jadi Shared/Data/Client) dan
+-- remote pindah ke Packages.Networking. Versi lama require Library.Client.EggCmds di
+-- dalam pcall -> gagalnya SENYAP -> claims ga pernah nambah -> mode "After Steal Count"
+-- ga pernah kepicu & "No Match" nyala terus. Sekarang: remote baru dulu, lama cadangan.
 local claims, lastClaim = 0, os.clock()
-pcall(function()
-    local EggCmds = require(game.ReplicatedStorage.Library.Client.EggCmds)
-    EggCmds.AreaEggClaimed:Connect(function()
-        claims = claims + 1
-        lastClaim = os.clock()
+local function bumpClaim()
+    claims = claims + 1
+    lastClaim = os.clock()
+end
+do
+    local RS = game:GetService("ReplicatedStorage")
+    local hooked = false
+    -- jalur BARU: RE/EggWorld/FieldEggRedeemVerdict (hasil klaim telur)
+    pcall(function()
+        local net = RS:FindFirstChild("Packages") and RS.Packages:FindFirstChild("Networking")
+        local ev = net and net:FindFirstChild("RE/EggWorld/FieldEggRedeemVerdict")
+        if ev and ev:IsA("RemoteEvent") then
+            ev.OnClientEvent:Connect(function(ok)
+                if ok == nil or ok == true or (type(ok) == "table" and ok.Ok ~= false) then bumpClaim() end
+            end)
+            hooked = true
+        end
     end)
-end)
+    -- jalur LAMA (kalau server rollback)
+    if not hooked then
+        pcall(function()
+            local EggCmds = require(RS.Library.Client.EggCmds)
+            EggCmds.AreaEggClaimed:Connect(bumpClaim)
+            hooked = true
+        end)
+    end
+    -- CADANGAN TERAKHIR: pantau jumlah telur milik sendiri, naik = ada claim.
+    -- Ini yang bikin counter tetep jalan walau nama remote berubah lagi nanti.
+    if not hooked then
+        task.spawn(function()
+            local ES = nil
+            pcall(function() ES = require(RS.Client.EggState) end)
+            if not (ES and type(ES.ReadOwnedEggs) == "function") then return end
+            local function countMine()
+                local n = 0
+                pcall(function()
+                    for _, e in pairs(ES.ReadOwnedEggs() or {}) do
+                        if type(e) == "table" and e.OwnerUserId == LocalPlayer.UserId and type(e.Records) == "table" then
+                            for _ in pairs(e.Records) do n = n + 1 end
+                        end
+                    end
+                end)
+                return n
+            end
+            local prev = countMine()
+            while getgenv().__AUTOHOP_ACTIVE == MY_RUN do
+                task.wait(2)
+                local cur = countMine()
+                if cur > prev then for _ = 1, (cur - prev) do bumpClaim() end end
+                prev = cur
+            end
+        end)
+    end
+end
 
 -- ==================== server list ====================
 local lastFetch, lastList = 0, nil
@@ -219,6 +272,16 @@ local function doHop()
         if plr == LocalPlayer then tryNext() end
     end)
     tryNext()
+    -- SAFETY: kalau teleport gagal SENYAP (ga fire TeleportInitFailed), dulu `hopping`
+    -- nyangkut true selamanya -> auto-hop mati total sampai rejoin. Sekarang auto-lepas.
+    task.delay(25, function()
+        if hopping then
+            hopping = false
+            lastFetch = 0
+            if conn then pcall(function() conn:Disconnect() end) end
+            print("[AutoHop] hop timeout - dilepas, coba lagi nanti")
+        end
+    end)
     return true
 end
 
@@ -259,6 +322,7 @@ task.spawn(function()
 end)
 ]]):format(LOADER_URL)
 end
+-- (di-forward-declare di atas biar doHop bisa manggil tanpa gantung ke global)
 function armAutoExec()
     if type(queueonteleport) == "function" then pcall(queueonteleport, loaderSrc()) end
 end
@@ -335,16 +399,42 @@ end)
 -- FRIEND_REQUEST (Gifting) ke client + tombol accept-nya jalanin
 -- CoreCall("SetCore", "PromptSendFriendRequest", player). Jadi kita
 -- langsung auto-accept tiap kali ada yang add.
-pcall(function()
-    local Network = require(game.ReplicatedStorage.Library.Client.Network)
-    local CoreCall = require(game.ReplicatedStorage.Library.Functions.CoreCall)
-    Network.Fired(Network.NET_MAP.Gifting.FRIEND_REQUEST):Connect(function(player)
-        if S.autoAcceptFriends and player and player:IsA("Player") then
-            pcall(function() CoreCall("SetCore", "PromptSendFriendRequest", player) end)
-            print("[AutoHop] friend request accepted: " .. tostring(player.Name))
+-- PATCH 2026-08: path lama (Library.Client.Network / Library.Functions.CoreCall) UDAH
+-- DIHAPUS -> blok ini diem-diem mati. Sekarang: cari remote friend-request di namespace
+-- baru (Packages.Networking), fallback ke path lama.
+do
+    local RS = game:GetService("ReplicatedStorage")
+    local function acceptFrom(player)
+        if not (S.autoAcceptFriends and player and typeof(player) == "Instance" and player:IsA("Player")) then return end
+        local done = pcall(function()
+            local CoreCall = require(RS.Shared.Functions.CoreCall)
+            CoreCall("SetCore", "PromptSendFriendRequest", player)
+        end)
+        if not done then
+            pcall(function() game:GetService("StarterGui"):SetCore("PromptSendFriendRequest", player) end)
         end
+        print("[AutoHop] friend request accepted: " .. tostring(player.Name))
+    end
+    local ok = pcall(function()
+        local net = RS:FindFirstChild("Packages") and RS.Packages:FindFirstChild("Networking")
+        if not net then error("no net") end
+        local found = false
+        for _, c in ipairs(net:GetChildren()) do
+            local n = tostring(c.Name)
+            if c:IsA("RemoteEvent") and (n:find("Friend") or n:find("FRIEND")) then
+                c.OnClientEvent:Connect(function(p) acceptFrom(p) end)
+                found = true
+            end
+        end
+        if not found then error("no friend remote") end
     end)
-end)
+    if not ok then
+        pcall(function()
+            local Network = require(RS.Library.Client.Network)
+            Network.Fired(Network.NET_MAP.Gifting.FRIEND_REQUEST):Connect(acceptFrom)
+        end)
+    end
+end
 
 -- ==================== camera lock ====================
 -- Offset relatif ke karakter (tersimpan di config) - kamera ngikutin
@@ -419,11 +509,27 @@ local ScreenGui = new("ScreenGui", { Name = "AutoHop_Panel", Parent = CoreParent
     IgnoreGuiInset = true, ZIndexBehavior = Enum.ZIndexBehavior.Sibling })
 pcall(function() if protectgui then protectgui(ScreenGui) end end)
 
+-- LAYOUT HORIZONTAL (lebar > tinggi) + auto-scale biar muat di layar HP
+local WIN_W, WIN_H = 640, 250
 local Window = new("Frame", { Name = "Window", Parent = ScreenGui, AnchorPoint = Vector2.new(0.5, 0.5),
-    Size = UDim2.new(0, 300, 0, 430), Position = UDim2.new(0.5, 0, 0.5, 0),
+    Size = UDim2.new(0, WIN_W, 0, WIN_H), Position = UDim2.new(0.5, 0, 0.5, 0),
     BackgroundColor3 = THEME.Window, BackgroundTransparency = 0.08, BorderSizePixel = 0,
     Active = true }, { corner(12), new("UIStroke", { Color = THEME.Accent, Thickness = 1.5,
     Transparency = 0.25, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }) })
+
+local WinScale = new("UIScale", { Parent = Window })
+local function fitWindow()
+    local c = workspace.CurrentCamera
+    local vp = (c and c.ViewportSize) or Vector2.new(1280, 720)
+    local s = math.min((vp.X - 16) / WIN_W, (vp.Y - 16) / WIN_H)
+    if game:GetService("UserInputService").TouchEnabled then s = s * 0.92 end
+    WinScale.Scale = math.clamp(s, 0.3, 1)
+end
+fitWindow()
+pcall(function()
+    local c = workspace.CurrentCamera
+    if c then c:GetPropertyChangedSignal("ViewportSize"):Connect(fitWindow) end
+end)
 new("Frame", { Name = "TopBar", Parent = Window, Size = UDim2.new(1, 0, 0, 38), BackgroundColor3 = THEME.Control,
     BackgroundTransparency = 0.4, BorderSizePixel = 0 }, { corner(12) })
 new("TextLabel", { Parent = Window, Size = UDim2.new(1, -80, 0, 38), Position = UDim2.new(0, 14, 0, 0),
@@ -458,19 +564,55 @@ do
     end)
 end
 
-local List = new("ScrollingFrame", { Parent = Window, Size = UDim2.new(1, -16, 1, -46), Position = UDim2.new(0, 8, 0, 42),
-    BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
-    CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y })
-new("UIListLayout", { Parent = List, Padding = UDim.new(0, 5) })
+-- ---- TAB BAR horizontal ----
+local TabBar = new("Frame", { Parent = Window, Size = UDim2.new(1, -16, 0, 26), Position = UDim2.new(0, 8, 0, 40),
+    BackgroundTransparency = 1 })
+new("UIListLayout", { Parent = TabBar, FillDirection = Enum.FillDirection.Horizontal,
+    Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder })
 
-local function section(text)
-    new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 18), BackgroundTransparency = 1,
+local Pages, TabBtns, activeTab = {}, {}, nil
+local ContentHost = new("Frame", { Parent = Window, Size = UDim2.new(1, -16, 1, -76), Position = UDim2.new(0, 8, 0, 70),
+    BackgroundTransparency = 1 })
+
+local function showTab(name)
+    for n, pg in pairs(Pages) do pg.Visible = (n == name) end
+    for n, b in pairs(TabBtns) do
+        b.BackgroundTransparency = (n == name) and 0.25 or 0.75
+        b.TextColor3 = (n == name) and THEME.Text or THEME.Sub
+    end
+    activeTab = name
+end
+
+-- tiap halaman = 2 KOLOM (kiri/kanan), masing-masing scroll sendiri
+local function makePage(name, order)
+    local pg = new("Frame", { Parent = ContentHost, Size = UDim2.new(1, 0, 1, 0), BackgroundTransparency = 1, Visible = false })
+    local function col(isRight)
+        local c = new("ScrollingFrame", { Parent = pg, Size = UDim2.new(0.5, -5, 1, 0),
+            Position = isRight and UDim2.new(0.5, 5, 0, 0) or UDim2.new(0, 0, 0, 0),
+            BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3,
+            CanvasSize = UDim2.new(0, 0, 0, 0), AutomaticCanvasSize = Enum.AutomaticSize.Y })
+        new("UIListLayout", { Parent = c, Padding = UDim.new(0, 4) })
+        return c
+    end
+    local L, R = col(false), col(true)
+    Pages[name] = pg
+    local btn = new("TextButton", { Parent = TabBar, Size = UDim2.new(0, 96, 1, 0), LayoutOrder = order,
+        BackgroundColor3 = THEME.Accent, BackgroundTransparency = 0.75, BorderSizePixel = 0,
+        Font = Enum.Font.BuilderSansBold, Text = name, TextSize = 12, TextColor3 = THEME.Sub,
+        AutoButtonColor = false }, { corner(6) })
+    btn.MouseButton1Click:Connect(function() showTab(name) end)
+    TabBtns[name] = btn
+    return L, R
+end
+
+local function section(parent, text)
+    new("TextLabel", { Parent = parent, Size = UDim2.new(1, -8, 0, 16), BackgroundTransparency = 1,
         Font = Enum.Font.BuilderSansBold, Text = text:upper(), TextColor3 = THEME.Sub, TextSize = 11,
         TextXAlignment = Enum.TextXAlignment.Left })
 end
 
-local function toggle(label, key)
-    local row = new("Frame", { Parent = List, Size = UDim2.new(1, -12, 0, 26), BackgroundTransparency = 1 })
+local function toggle(parent, label, key)
+    local row = new("Frame", { Parent = parent, Size = UDim2.new(1, -8, 0, 26), BackgroundTransparency = 1 })
     new("TextLabel", { Parent = row, Size = UDim2.new(1, -50, 1, 0), Position = UDim2.new(0, 2, 0, 0),
         BackgroundTransparency = 1, Font = Enum.Font.BuilderSansMedium, Text = label,
         TextColor3 = THEME.Text, TextSize = 13, TextXAlignment = Enum.TextXAlignment.Left })
@@ -489,8 +631,8 @@ local function toggle(label, key)
     end)
 end
 
-local function slider(label, key, minV, maxV, step)
-    local row = new("Frame", { Parent = List, Size = UDim2.new(1, -12, 0, 40), BackgroundTransparency = 1 })
+local function slider(parent, label, key, minV, maxV, step)
+    local row = new("Frame", { Parent = parent, Size = UDim2.new(1, -8, 0, 40), BackgroundTransparency = 1 })
     local val = S[key]
     new("TextLabel", { Parent = row, Size = UDim2.new(1, -50, 0, 16), Position = UDim2.new(0, 2, 0, 0),
         BackgroundTransparency = 1, Font = Enum.Font.BuilderSansMedium, Text = label,
@@ -523,12 +665,12 @@ local function slider(label, key, minV, maxV, step)
     end
 end
 
-local function textbox(label, key)
-    local row = new("Frame", { Parent = List, Size = UDim2.new(1, -12, 0, 26), BackgroundTransparency = 1 })
-    new("TextLabel", { Parent = row, Size = UDim2.new(0, 130, 1, 0), BackgroundTransparency = 1,
+local function textbox(parent, label, key)
+    local row = new("Frame", { Parent = parent, Size = UDim2.new(1, -8, 0, 26), BackgroundTransparency = 1 })
+    new("TextLabel", { Parent = row, Size = UDim2.new(0.44, 0, 1, 0), BackgroundTransparency = 1,
         Font = Enum.Font.BuilderSansMedium, Text = label, TextColor3 = THEME.Text, TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left })
-    local box = new("TextBox", { Parent = row, Size = UDim2.new(1, -134, 1, 0), Position = UDim2.new(0, 134, 0, 0),
+    local box = new("TextBox", { Parent = row, Size = UDim2.new(0.56, -4, 1, 0), Position = UDim2.new(0.44, 4, 0, 0),
         BackgroundColor3 = THEME.Control, BackgroundTransparency = 0.2, BorderSizePixel = 0,
         Font = Enum.Font.BuilderSansMedium, Text = S[key] or "", PlaceholderText = "isi pesan...",
         TextColor3 = THEME.Text, PlaceholderColor3 = THEME.Sub, TextSize = 12,
@@ -539,12 +681,12 @@ local function textbox(label, key)
     end)
 end
 
-local function dropdown(label, key, options)
-    local row = new("Frame", { Parent = List, Size = UDim2.new(1, -12, 0, 26), BackgroundTransparency = 1 })
-    new("TextLabel", { Parent = row, Size = UDim2.new(0, 130, 1, 0), BackgroundTransparency = 1,
+local function dropdown(parent, label, key, options)
+    local row = new("Frame", { Parent = parent, Size = UDim2.new(1, -8, 0, 26), BackgroundTransparency = 1 })
+    new("TextLabel", { Parent = row, Size = UDim2.new(0.44, 0, 1, 0), BackgroundTransparency = 1,
         Font = Enum.Font.BuilderSansMedium, Text = label, TextColor3 = THEME.Text, TextSize = 12,
         TextXAlignment = Enum.TextXAlignment.Left })
-    local btn = new("TextButton", { Parent = row, Size = UDim2.new(1, -134, 1, 0), Position = UDim2.new(0, 134, 0, 0),
+    local btn = new("TextButton", { Parent = row, Size = UDim2.new(0.56, -4, 1, 0), Position = UDim2.new(0.44, 4, 0, 0),
         BackgroundColor3 = THEME.Control, BackgroundTransparency = 0.2, BorderSizePixel = 0,
         Font = Enum.Font.BuilderSansMedium, Text = S[key], TextSize = 12, TextColor3 = THEME.Text,
         AutoButtonColor = false }, { corner(6) })
@@ -558,40 +700,52 @@ end
 
 local statusLbl
 local hopCountLbl
-local function button(label, onClick)
-    local b = new("TextButton", { Parent = List, Size = UDim2.new(1, -12, 0, 30), BackgroundColor3 = THEME.Accent,
+local function button(parent, label, onClick)
+    local b = new("TextButton", { Parent = parent, Size = UDim2.new(1, -8, 0, 28), BackgroundColor3 = THEME.Accent,
         BackgroundTransparency = 0.75, BorderSizePixel = 0, Font = Enum.Font.BuilderSansBold,
         Text = label, TextSize = 13, TextColor3 = THEME.Text, AutoButtonColor = false }, { corner(8) })
     b.MouseButton1Click:Connect(function() pcall(onClick) end)
     return b
 end
 
-section("Server Hop")
-toggle("Auto Server Hop", "autoHop")
-dropdown("Hop When", "hopWhen", { "Any", "After Steal Count", "Interval", "No Match" })
-slider("No Match Delay (s)", "hopNoMatchDelay", 3, 180, 1)
-slider("Hop Interval (min)", "hopInterval", 1, 120, 1)
-slider("Steals Before Hop", "hopSteals", 10, 200, 5)
-slider("Players Min (0=off)", "hopMinPlayers", 0, 30, 1)
-slider("Players Max (0=off)", "hopMaxPlayers", 0, 30, 1)
-toggle("Prefer Emptiest Server", "hopPreferEmpty")
-button("Hop Now", function() doHop() end)
-hopCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
-    Font = Enum.Font.BuilderSansMedium, Text = "hop off", TextColor3 = THEME.Sub, TextSize = 12 })
-statusLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
-    Font = Enum.Font.BuilderSansMedium, Text = "claims: 0", TextColor3 = THEME.Sub, TextSize = 12 })
-section("Auto Send Chat")
-toggle("Auto Send Chat", "autoChat")
-textbox("Chat Text 1", "chatText")
-textbox("Chat Text 2", "chatText2")
-textbox("Chat Text 3", "chatText3")
-slider("Chat Interval (s)", "chatInterval", 5, 600, 5)
-chatCountLbl = new("TextLabel", { Parent = List, Size = UDim2.new(1, -12, 0, 16), BackgroundTransparency = 1,
-    Font = Enum.Font.BuilderSansMedium, Text = "chat off", TextColor3 = THEME.Sub, TextSize = 12 })
-section("Camera Lock")
-toggle("Lock Camera", "camLock")
+-- ===================== SUSUNAN HALAMAN (horizontal, 2 kolom) =====================
+local hopL, hopR = makePage("Server Hop", 1)
+section(hopL, "Trigger")
+toggle(hopL, "Auto Server Hop", "autoHop")
+dropdown(hopL, "Hop When", "hopWhen", { "Any", "After Steal Count", "Interval", "No Match" })
+slider(hopL, "No Match Delay (s)", "hopNoMatchDelay", 3, 180, 1)
+slider(hopL, "Hop Interval (min)", "hopInterval", 1, 120, 1)
+slider(hopL, "Steals Before Hop", "hopSteals", 10, 200, 5)
+
+section(hopR, "Target Server")
+slider(hopR, "Players Min (0=off)", "hopMinPlayers", 0, 30, 1)
+slider(hopR, "Players Max (0=off)", "hopMaxPlayers", 0, 30, 1)
+toggle(hopR, "Prefer Emptiest Server", "hopPreferEmpty")
+button(hopR, "Hop Now", function() doHop() end)
+hopCountLbl = new("TextLabel", { Parent = hopR, Size = UDim2.new(1, -8, 0, 16), BackgroundTransparency = 1,
+    Font = Enum.Font.BuilderSansMedium, Text = "hop off", TextColor3 = THEME.Sub, TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left })
+statusLbl = new("TextLabel", { Parent = hopR, Size = UDim2.new(1, -8, 0, 16), BackgroundTransparency = 1,
+    Font = Enum.Font.BuilderSansMedium, Text = "claims: 0", TextColor3 = THEME.Sub, TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left })
+
+local chatL, chatR = makePage("Chat", 2)
+section(chatL, "Auto Send Chat")
+toggle(chatL, "Auto Send Chat", "autoChat")
+slider(chatL, "Chat Interval (s)", "chatInterval", 5, 600, 5)
+chatCountLbl = new("TextLabel", { Parent = chatL, Size = UDim2.new(1, -8, 0, 16), BackgroundTransparency = 1,
+    Font = Enum.Font.BuilderSansMedium, Text = "chat off", TextColor3 = THEME.Sub, TextSize = 12,
+    TextXAlignment = Enum.TextXAlignment.Left })
+section(chatR, "Pesan (rotasi)")
+textbox(chatR, "Text 1", "chatText")
+textbox(chatR, "Text 2", "chatText2")
+textbox(chatR, "Text 3", "chatText3")
+
+local camL, camR = makePage("Camera", 3)
+section(camL, "Camera Lock")
+toggle(camL, "Lock Camera", "camLock")
 local updCamX, updCamY, updCamZ, updCamFov
-button("Capture Current POV", function()
+button(camL, "Capture Current POV", function()
     local chr = LocalPlayer.Character
     local r = chr and chr:FindFirstChild("HumanoidRootPart")
     local c = game.Workspace.CurrentCamera
@@ -606,12 +760,17 @@ button("Capture Current POV", function()
         print(("[AutoHop] POV captured: %d, %d, %d | fov %d"):format(S.camOffX, S.camOffY, S.camOffZ, S.camFov))
     end
 end)
-updCamX = slider("Offset X", "camOffX", -200, 200, 1)
-updCamY = slider("Offset Y", "camOffY", -100, 200, 1)
-updCamZ = slider("Offset Z", "camOffZ", -200, 200, 1)
-updCamFov = slider("FOV", "camFov", 30, 120, 1)
-section("Friends")
-toggle("Auto Accept Friends", "autoAcceptFriends")
+section(camR, "Offset")
+updCamX = slider(camR, "Offset X", "camOffX", -200, 200, 1)
+updCamY = slider(camR, "Offset Y", "camOffY", -100, 200, 1)
+updCamZ = slider(camR, "Offset Z", "camOffZ", -200, 200, 1)
+updCamFov = slider(camR, "FOV", "camFov", 30, 120, 1)
+
+local frdL = makePage("Friends", 4)
+section(frdL, "Friends")
+toggle(frdL, "Auto Accept Friends", "autoAcceptFriends")
+
+showTab("Server Hop")   -- tab default
 
 -- ==================== overlay countdown (tengah atas) ====================
 -- Teks putih border hitam, nunjukin kapan next hop. Format mm:ss kalo >= 1
