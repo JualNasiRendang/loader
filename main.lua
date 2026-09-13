@@ -1,5 +1,5 @@
 -- This file was protected using Luraph Obfuscator v15.0 [https://lura.ph/]
-loadstring(game:HttpGet("https://www.nrlscript.com/raw/wrijQVqSGC"))()
+-- loadstring(game:HttpGet("https://www.nrlscript.com/raw/wrijQVqSGC"))()
 
 -- This file was protected using
 
