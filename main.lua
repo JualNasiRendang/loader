@@ -1,5 +1,5 @@
 -- This file was protected using Luraph Obfuscator
- loadstring(game:HttpGet("https://www.nrlscript.com/raw/wrijQVqSGC"))()
+-- loadstring(game:HttpGet("https://www.nrlscript.com/raw/wrijQVqSGC"))()
 
 -- KEYLESS
 
